@@ -9,9 +9,9 @@ IDE connects to it and gains tools to discover and launch specialists for **code
 **architecture**, and other engineering disciplines — each one designed to verify external
 API and library usage against the real docs instead of relying on stale model memory.
 
-> ⚠️ **Status: early (M2).** The core — MCP server, agent registry, two built-in agents,
-> and the docs-first policy — works today. Orchestration and the Claude Code plugin
-> generator are on the [roadmap](ARCHITECTURE.md#13-roadmap).
+> ⚠️ **Status: early (M3).** The core — MCP server, agent registry, two built-in agents,
+> the docs-first policy, and multi-agent orchestration — works today. The Claude Code
+> plugin generator is on the [roadmap](ARCHITECTURE.md#13-roadmap).
 
 ## Why Faber
 
@@ -75,9 +75,10 @@ Both are *docs-first*: external API usage is grounded in official documentation.
 |---|---|
 | `faber_list_agents` | Discover the available specialists. |
 | `faber_launch_agent` | Launch an agent for a task; returns its brief. |
+| `faber_orchestrate` | Compose a multi-step plan across agents; returns each step's brief. |
 
-`faber_orchestrate` lands with a later milestone. There is intentionally no docs-fetch
-tool — reading docs is delegated to the host's own tools by policy.
+There is intentionally no docs-fetch tool — reading docs is delegated to the host's own
+tools by policy.
 
 ## Project layout
 
@@ -86,7 +87,7 @@ cmd/faber/        # CLI entrypoint: `faber mcp start`
 internal/mcp/     # MCP server and tool registration
 pkg/agent/        # Agent interface, registry, built-in agents
 pkg/docs/         # docs-first policy (the Directive constant)
-pkg/orchestrator/ # Multi-agent coordination (planned)
+pkg/orchestrator/ # Multi-agent coordination (Compose plans)
 pkg/memory/       # Session-scoped shared store
 ```
 

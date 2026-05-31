@@ -6,9 +6,9 @@
 > good engineering discipline, most importantly treating *official documentation as the
 > source of truth* when working with external APIs and libraries.
 
-> **Status:** M0–M2 implemented (MCP server, agent registry, two built-in agents,
-> docs-first policy). Orchestration and the Claude Code plugin generator are planned —
-> see the [roadmap](#13-roadmap).
+> **Status:** M0–M3 implemented (MCP server, agent registry, two built-in agents,
+> docs-first policy, multi-agent orchestration). The Claude Code plugin generator is
+> planned — see the [roadmap](#13-roadmap).
 
 ---
 
@@ -136,7 +136,7 @@ faber/
 │   ├── registry.go            # Register / Get / List (concurrency-safe)
 │   └── builtin/               # code-reviewer, architect
 ├── pkg/docs/                  # docs-first policy: the Directive constant
-├── pkg/orchestrator/          # multi-agent coordination (planned, M3)
+├── pkg/orchestrator/          # multi-agent coordination (Compose plans)
 ├── pkg/memory/                # session-scoped shared store (MapStore)
 └── go.mod                     # module github.com/KhizarA77/Faber
 ```
@@ -260,7 +260,7 @@ interface later without touching agents.
 
 ---
 
-## 10. Orchestrator (`pkg/orchestrator`, planned — M3)
+## 10. Orchestrator (`pkg/orchestrator`)
 
 In the brief-and-delegate model, "orchestration" means **composing multiple agent briefs
 into one coordination plan** the host executes step by step (sequential / parallel /
@@ -274,7 +274,7 @@ pipeline), with shared state flowing through `pkg/memory`. Exposed as `faber_orc
 |---|---|---|
 | `faber_list_agents` | implemented | `[]Meta` for host routing |
 | `faber_launch_agent` | implemented | `Brief` for `role` + `task` |
-| `faber_orchestrate` | planned (M3) | a multi-step coordination plan |
+| `faber_orchestrate` | implemented | a multi-step coordination plan (CompositeBrief) |
 
 Note: there is **no** `faber_consult_docs` tool — docs reading is delegated to the host's own
 tools by policy, not performed by Faber.
@@ -301,8 +301,8 @@ tools by policy, not performed by Faber.
 | **M0** | MCP server + `faber_list_agents` | ✅ done |
 | **M1** | `Agent` interface, registry, `code-reviewer` + `architect`, `faber_launch_agent` | ✅ done |
 | **M2** | Docs-first policy (`docs.Directive`) baked into briefs | ✅ done |
-| **Tests** | Unit tests for registry, memory, and built-in briefs | ▶ in progress |
-| **M3** | Orchestrator + `faber_orchestrate` | planned |
+| **M3** | Orchestrator + `faber_orchestrate` | ✅ done |
+| **Tests** | Unit tests for registry, memory, built-in briefs, and orchestrator | ✅ done |
 | **M4** | `faber init --claude` generates subagent files + plugin manifest | planned |
 | **M5** | More built-in agents, examples, polish | planned |
 

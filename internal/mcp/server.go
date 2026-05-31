@@ -9,12 +9,14 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/KhizarA77/Faber/pkg/agent"
+	"github.com/KhizarA77/Faber/pkg/orchestrator"
 )
 
 // Server wraps an MCP server with Faber's agent registry and shared deps.
 type Server struct {
 	reg  *agent.Registry
 	deps agent.Deps
+	orch *orchestrator.Orchestrator
 	mcp  *mcpsdk.Server
 }
 
@@ -23,6 +25,7 @@ func NewServer(reg *agent.Registry, deps agent.Deps) *Server {
 	s := &Server{
 		reg:  reg,
 		deps: deps,
+		orch: orchestrator.New(reg, deps),
 		mcp:  mcpsdk.NewServer(&mcpsdk.Implementation{Name: "faber", Version: "0.1.0"}, nil),
 	}
 	s.registerTools()
@@ -43,8 +46,15 @@ func (s *Server) registerTools() {
 	mcpsdk.AddTool(s.mcp, &mcpsdk.Tool{
 		Name: "faber_launch_agent",
 		Description: "Launch a specialized Faber agent. Returns a brief — persona, " +
-			"instructions, pre-fetched authoritative docs, and policies — for you to execute.",
+			"instructions, and policies — for you to execute.",
 	}, s.handleLaunchAgent)
+
+	mcpsdk.AddTool(s.mcp, &mcpsdk.Tool{
+		Name: "faber_orchestrate",
+		Description: "Compose a multi-step plan across specialized agents. Returns each " +
+			"step's brief plus the execution mode (sequential or parallel) for you to carry out.",
+	}, s.handleOrchestrate)
+
 }
 
 // --- faber_list_agents ---
@@ -110,4 +120,49 @@ func (s *Server) handleLaunchAgent(ctx context.Context, _ *mcpsdk.CallToolReques
 		Tools:        brief.Tools,
 		Policies:     brief.Policies,
 	}, nil
+}
+
+// --- faber_orchestrate ---
+
+type orchestrateStepInput struct {
+	Agent     string   `json:"agent" jsonschema:"the agent for this step, e.g. architect"`
+	Task      string   `json:"task" jsonschema:"what this step should accomplish"`
+	Libraries []string `json:"libraries,omitempty" jsonschema:"external libraries in play for this step"`
+}
+
+type orchestrateInput struct {
+	Mode  string                 `json:"mode,omitempty" jsonschema:"how to run the steps: sequential (default) or parallel"`
+	Steps []orchestrateStepInput `json:"steps" jsonschema:"the ordered steps to run"`
+}
+
+type orchestrateStepOutput struct {
+	Agent string      `json:"agent"`
+	Task  string      `json:"task"`
+	Brief agent.Brief `json:"brief"`
+}
+
+type orchestrateOutput struct {
+	Mode  string                  `json:"mode"`
+	Steps []orchestrateStepOutput `json:"steps"`
+}
+
+func (s *Server) handleOrchestrate(ctx context.Context, _ *mcpsdk.CallToolRequest, in orchestrateInput) (*mcpsdk.CallToolResult, orchestrateOutput, error) {
+	steps := make([]orchestrator.Step, 0, len(in.Steps))
+	for _, st := range in.Steps {
+		steps = append(steps, orchestrator.Step{Agent: st.Agent, Task: st.Task, Libraries: st.Libraries})
+	}
+
+	composite, err := s.orch.Compose(ctx, orchestrator.Plan{
+		Mode:  orchestrator.Mode(in.Mode),
+		Steps: steps,
+	})
+	if err != nil {
+		return nil, orchestrateOutput{}, err
+	}
+
+	out := orchestrateOutput{Mode: string(composite.Mode), Steps: make([]orchestrateStepOutput, 0, len(composite.Steps))}
+	for _, st := range composite.Steps {
+		out.Steps = append(out.Steps, orchestrateStepOutput{Agent: st.Agent, Task: st.Task, Brief: st.Brief})
+	}
+	return nil, out, nil
 }

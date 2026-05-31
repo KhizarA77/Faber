@@ -33,10 +33,10 @@ type Input struct {
 
 // Brief is what the host receives and then executes itself.
 type Brief struct {
-	SystemPrompt string
-	Instructions string
-	Tools        []string
-	Policies     []Policy
+	SystemPrompt string   `json:"systemPrompt"`
+	Instructions string   `json:"instructions"`
+	Tools        []string `json:"tools,omitempty"`
+	Policies     []Policy `json:"policies,omitempty"`
 }
 
 // Deps is the injected toolbox an Agent uses when building a brief. It is the
