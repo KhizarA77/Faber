@@ -1,0 +1,33 @@
+# Compiled binaries
+faber
+faber.exe
+/bin/
+/dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test & coverage artifacts
+*.test
+*.out
+coverage.*
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Local docs cache (M2 docs subsystem)
+/.faber-cache/
+
+# Environment / secrets
+.env
+*.local
+
+# Editor / OS noise
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+.DS_Store
+Thumbs.db
