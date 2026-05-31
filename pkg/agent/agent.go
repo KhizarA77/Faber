@@ -6,7 +6,6 @@ package agent
 import (
 	"context"
 
-	"github.com/KhizarA77/Faber/pkg/docs"
 	"github.com/KhizarA77/Faber/pkg/memory"
 )
 
@@ -36,19 +35,18 @@ type Input struct {
 type Brief struct {
 	SystemPrompt string
 	Instructions string
-	DocPacks     []docs.Pack
 	Tools        []string
 	Policies     []Policy
 }
 
-// Deps is the injected toolbox an Agent uses when building a brief.
+// Deps is the injected toolbox an Agent uses when building a brief. It is the
+// seam for future subsystems (e.g. shared memory during orchestration).
 type Deps struct {
-	Docs docs.Service
-	Mem  memory.Store
+	Mem memory.Store
 }
 
 // Policy is a machine-checkable contract carried by a Brief.
 type Policy struct {
-	Name string // e.g. "docs_first"
-	Rule string // host-readable contract text
+	Name string `json:"name"`
+	Rule string `json:"rule"`
 }

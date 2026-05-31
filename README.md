@@ -9,16 +9,17 @@ IDE connects to it and gains tools to discover and launch specialists for **code
 **architecture**, and other engineering disciplines — each one designed to verify external
 API and library usage against the real docs instead of relying on stale model memory.
 
-> ⚠️ **Status: early (M1).** The core — MCP server, agent registry, and two built-in
-> agents — works today. The live docs engine, orchestration, and Claude Code plugin
-> generation are on the [roadmap](ARCHITECTURE.md#13-roadmap).
+> ⚠️ **Status: early (M2).** The core — MCP server, agent registry, two built-in agents,
+> and the docs-first policy — works today. Orchestration and the Claude Code plugin
+> generator are on the [roadmap](ARCHITECTURE.md#13-roadmap).
 
 ## Why Faber
 
 - **Specialized agents, not one generalist.** Launch a code reviewer, an architect, and
   more — each with a focused persona and policies.
-- **Docs are the source of truth.** Agents marked *docs-first* pre-fetch authoritative
-  documentation and inject it into their brief, so the IDE reasons over real docs.
+- **Docs are the source of truth.** Agents marked *docs-first* carry a policy that makes
+  the IDE verify external APIs against current official docs — using its own search and
+  fetch tools — instead of relying on stale training memory.
 - **IDE-agnostic.** One MCP server works across Claude Code, Codex, and any MCP host.
 - **Tiny, trusted core.** Written in Go with a single external dependency (the official
   Go MCP SDK). No API keys required — your IDE's own model does the work.
@@ -26,15 +27,16 @@ API and library usage against the real docs instead of relying on stale model me
 ## How it works
 
 Faber uses a **brief & delegate** model. When the IDE launches an agent, Faber assembles a
-*brief* — persona, ordered instructions, pre-fetched docs, and policies — and hands it back.
-The IDE's own model adopts that brief and executes the task, calling `faber_consult_docs`
-for anything it still needs to verify.
+*brief* — persona, ordered instructions, and policies — and hands it back. The IDE's own
+model adopts that brief and executes the task with its own tools, honoring the docs-first
+policy: search the codebase for existing patterns, then read the official docs (which win
+any conflict). Faber itself fetches nothing.
 
 ```
 IDE ──▶ faber_launch_agent(role="code-reviewer", task, libraries)
-            └─▶ Agent.BuildBrief() ──▶ pre-fetch authoritative docs
-                    └─▶ returns Brief{ persona, instructions, docs, policies }
-        IDE adopts the brief and does the work, docs already in context.
+            └─▶ Agent.BuildBrief() ──▶ returns Brief{ persona, instructions, policies }
+        IDE adopts the brief and does the work with its own grep/web tools,
+        grounding external APIs in official docs per the docs-first policy.
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
@@ -74,7 +76,8 @@ Both are *docs-first*: external API usage is grounded in official documentation.
 | `faber_list_agents` | Discover the available specialists. |
 | `faber_launch_agent` | Launch an agent for a task; returns its brief. |
 
-More tools (`faber_consult_docs`, `faber_orchestrate`) land with later milestones.
+`faber_orchestrate` lands with a later milestone. There is intentionally no docs-fetch
+tool — reading docs is delegated to the host's own tools by policy.
 
 ## Project layout
 
@@ -82,7 +85,7 @@ More tools (`faber_consult_docs`, `faber_orchestrate`) land with later milestone
 cmd/faber/        # CLI entrypoint: `faber mcp start`
 internal/mcp/     # MCP server and tool registration
 pkg/agent/        # Agent interface, registry, built-in agents
-pkg/docs/         # Documentation-as-source-of-truth subsystem
+pkg/docs/         # docs-first policy (the Directive constant)
 pkg/orchestrator/ # Multi-agent coordination (planned)
 pkg/memory/       # Session-scoped shared store
 ```

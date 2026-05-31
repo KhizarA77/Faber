@@ -9,7 +9,6 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/KhizarA77/Faber/pkg/agent"
-	"github.com/KhizarA77/Faber/pkg/docs"
 )
 
 // Server wraps an MCP server with Faber's agent registry and shared deps.
@@ -88,7 +87,6 @@ type launchAgentInput struct {
 type launchAgentOutput struct {
 	SystemPrompt string         `json:"systemPrompt"`
 	Instructions string         `json:"instructions"`
-	DocPacks     []docs.Pack    `json:"docPacks,omitempty"`
 	Tools        []string       `json:"tools,omitempty"`
 	Policies     []agent.Policy `json:"policies,omitempty"`
 }
@@ -109,7 +107,6 @@ func (s *Server) handleLaunchAgent(ctx context.Context, _ *mcpsdk.CallToolReques
 	return nil, launchAgentOutput{
 		SystemPrompt: brief.SystemPrompt,
 		Instructions: brief.Instructions,
-		DocPacks:     brief.DocPacks,
 		Tools:        brief.Tools,
 		Policies:     brief.Policies,
 	}, nil

@@ -18,9 +18,6 @@ coverage.*
 go.work
 go.work.sum
 
-# Local docs cache (M2 docs subsystem)
-/.faber-cache/
-
 # Environment / secrets
 .env
 *.local

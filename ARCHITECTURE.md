@@ -1,38 +1,43 @@
 # Faber — Architecture
 
-> **Faber** (Latin: *craftsman, maker*) is an agent‑orchestration library written in Go.
-> It gives any MCP‑capable coding IDE — Claude Code, Codex, Cursor — the ability to
-> launch specialized coding agents (code review, architecture, scalability, docs research)
-> through a single, dependency‑light server.
+> **Faber** (Latin: *craftsman, maker*) is an agent-orchestration library written in Go.
+> It gives any MCP-capable coding IDE — Claude Code, Codex, Cursor — the ability to
+> launch specialized coding agents (code review, architecture, scalability) that follow
+> good engineering discipline, most importantly treating *official documentation as the
+> source of truth* when working with external APIs and libraries.
+
+> **Status:** M0–M2 implemented (MCP server, agent registry, two built-in agents,
+> docs-first policy). Orchestration and the Claude Code plugin generator are planned —
+> see the [roadmap](#13-roadmap).
 
 ---
 
 ## 1. Vision & scope
 
 Modern coding IDEs already have a capable model in the loop. What they lack is a
-**reusable, IDE‑agnostic library of specialists** and a **discipline layer** that forces
-good engineering practice — most importantly, treating *official documentation as the
-single source of truth* whenever external APIs or libraries are involved.
+**reusable, IDE-agnostic library of specialists** and a **discipline layer** that enforces
+good engineering practice — above all, grounding external-API code in current official
+documentation rather than the model's training memory.
 
-Faber provides exactly that, and nothing more than it needs to:
+Faber provides exactly that, and no more than it needs to:
 
 - A registry of **specialized coding agents** defined in Go.
 - An **MCP server** so any MCP host can discover and launch those agents.
-- A **docs‑as‑source‑of‑truth** subsystem that fetches and caches authoritative
-  documentation and injects it into agent briefs.
-- A **Claude Code plugin generator** for native, first‑class ergonomics on Claude Code.
+- A **docs-first policy** that mandates agents verify external APIs against official docs
+  using the host's own tools.
+- A **Claude Code plugin generator** for native ergonomics on Claude Code (planned).
 
-### Non‑goals (for v0)
+### Non-goals (v0)
 
 - Faber does **not** run LLM inference, hold API keys, or manage providers. The host
   IDE's own model does the thinking. (See §3, *Brief & delegate*.)
-- No vector database, embeddings, or RAG in v0 — docs are fetched and cached, not
-  semantically indexed. (Reserved for a later milestone.)
-- No daemon, background workers, or swarm consensus. Faber is a synchronous server
-  that answers tool calls.
+- Faber does **not** fetch, parse, or cache documentation. It delegates that to the host's
+  existing web and codebase search tools. (See §4.)
+- No daemon, background workers, or swarm consensus. Faber is a synchronous server that
+  answers tool calls.
 
-These are deliberate. The smaller the surface, the faster Faber ships and the easier
-it is to trust in an open‑source supply chain.
+These are deliberate. The smaller the surface, the faster Faber ships and the easier it is
+to trust in an open-source supply chain — its only external dependency is the Go MCP SDK.
 
 ---
 
@@ -44,84 +49,79 @@ Every design choice below follows from four early decisions:
 |---|---|---|
 | Who runs inference? | **Brief & delegate** — host runs it | No provider layer, no API keys, no agent loop in Go |
 | Integration surface | **MCP server + Claude Code plugin** | One core protocol + generated native ergonomics |
-| Docs engine depth | **Fetch + cache** | Simple, fast, no embeddings infra |
-| Agent definition | **Go‑coded agents** | Type‑safe, compiler‑checked, developer‑extensible |
+| Docs strategy | **Pure delegation (policy)** | No fetcher/cache/URLs; the host reads docs with its own tools |
+| Agent definition | **Go-coded agents** | Type-safe, compiler-checked, developer-extensible |
 
 ---
 
 ## 3. Core model — "Brief & delegate"
 
 Faber agents do **not** call an LLM. An agent is a Go type whose job is to **assemble a
-brief**: a persona, an ordered set of instructions, the authoritative documentation it
-pre‑fetched, and the Faber tools the host should use. The host IDE's model then *adopts*
-that brief and executes the work itself.
+brief**: a persona, an ordered set of instructions, and the policies it must follow (notably
+docs-first). The host IDE's model then *adopts* that brief and executes the work itself,
+using its own tools.
 
 ```
-Claude Code  ──calls──▶  faber_launch_agent(role="code-reviewer", task, libraries=["pgx"])
+Claude Code  ──calls──▶  faber_launch_agent(role="code-reviewer", task, libraries)
                               │
                               ▼
-                    Agent.BuildBrief(ctx, in, deps)
-                              │  └─ deps.Docs.PrefetchAll(ctx, libraries)  ← docs-as-truth
-                              ▼
-        returns Brief{ SystemPrompt, Instructions, DocPacks, Tools, Policies }
+                    Agent.BuildBrief() ──▶ assembles persona + instructions + policies
                               │
-   Host model adopts the persona — real docs already in its context — and may call
-   faber_consult_docs on demand for anything it still needs to verify.
+        returns Brief{ SystemPrompt, Instructions, Tools, Policies }
+                              │
+   Host model adopts the persona and carries out the task with its own tools,
+   honoring the docs-first policy (grep the codebase, then read official docs).
 ```
 
-**Why this is the right v0:** it is free (uses the user's existing IDE subscription),
-needs no secrets, and keeps Faber tiny. The trade‑off — Faber cannot run a fully
-autonomous multi‑agent loop by itself — is acceptable now and is the explicit upgrade
-path in §11.
+**Why this is the right v0:** it is free (uses the user's existing IDE subscription), needs
+no secrets, and keeps Faber tiny. The trade-off — Faber cannot run a fully autonomous
+multi-agent loop by itself — is acceptable now and is the explicit upgrade path in §11.
 
 ---
 
-## 4. Documentation as the source of truth
+## 4. Documentation as the source of truth (pure delegation)
 
-This is Faber's signature behavior, and it is enforced by **construction**, not just by
-asking the model nicely.
+This is Faber's signature behavior. The key realization: **the host IDE already has
+excellent search and fetch tools** (web search, web fetch, codebase grep/glob). Faber does
+not duplicate them — it would do the host's job worse. Instead, Faber's job is purely to
+**enforce the discipline**.
 
-1. **Pre‑fetch & inject.** When an agent declares `DocsFirst: true`, `BuildBrief`
-   resolves every library in `Input.Libraries` to its canonical docs, fetches the
-   relevant pages, and embeds them in the brief as `DocPacks`. The host model therefore
-   reasons over *fresh, real documentation already in context* rather than stale training
-   memory.
-2. **On‑demand verification.** The brief grants the host the `faber_consult_docs` tool
-   and instructs it to call that tool before asserting any external API behavior it has
-   not already seen in a `DocPack`.
-3. **Policy contracts.** Each brief carries machine‑checkable `Policy` entries (e.g.
-   `docs_first`). In the Claude Code plugin path these can later be wired to a **hook**
-   that hard‑blocks unverified external‑API claims (post‑v0).
+Every agent whose `Meta.DocsFirst` is true carries the `docs.Directive` policy in its brief.
+The directive mandates a strict source-of-truth order:
 
-In the brief‑and‑delegate model we cannot *force* the host's model, so the strongest
-available lever is **getting the real docs into its context window** — which is exactly
-what step 1 does.
+1. **Codebase first.** Use the host's grep/glob to find existing usage and follow the
+   project's established patterns.
+2. **Then official docs.** Use the host's web search/fetch to read the official
+   documentation for the libraries involved.
+3. **Docs win conflicts.** When prior knowledge or assumptions disagree with the official
+   docs, the docs are authoritative. Never rely on training memory for a verifiable API.
+
+Faber performs **no network I/O** and ships **no documentation data** — the directive is a
+single constant (`docs.Directive`), and the host does all the reading. "Docs" here means
+documentation for *any* ecosystem (npm, PyPI, crates, Go, GitHub, …); the host's own search
+locates it.
 
 ---
 
 ## 5. Integration surfaces
 
-### 5a. MCP server (canonical)
+### 5a. MCP server (canonical, implemented)
 
-Faber runs as a Model Context Protocol server over stdio (and later HTTP), built on the
-official Go SDK (`github.com/modelcontextprotocol/go-sdk`). Any MCP host registers it:
+Faber runs as a Model Context Protocol server over stdio, built on the official Go SDK
+(`github.com/modelcontextprotocol/go-sdk`, v1.6.x). Any MCP host registers it:
 
 ```
 claude mcp add faber -- faber mcp start
 ```
 
-Tools then appear to the host as `mcp__faber__list_agents`, `mcp__faber__launch_agent`, etc.
+Tools appear to the host as `mcp__faber__list_agents`, `mcp__faber__launch_agent`, etc.
 
-### 5b. Claude Code plugin (generated)
+### 5b. Claude Code plugin (generated, planned)
 
-`faber init --claude` reads the agent registry and **generates** native Claude Code
-artifacts from the same Go definitions:
-
-- `.claude/agents/<name>.md` — a subagent file per registered agent, with its persona,
-  the docs‑first contract, and a pointer to `faber_consult_docs`.
-- Slash commands / a plugin manifest for marketplace install.
-
-One source of truth (the Go registry) → two delivery mechanisms. No drift.
+`faber init --claude` will read the agent registry and **generate** native Claude Code
+artifacts from the same Go definitions — a subagent file per agent (persona + docs-first
+contract) and a plugin manifest. One source of truth (the Go registry) → two delivery
+mechanisms, no drift.
 
 ---
 
@@ -129,22 +129,21 @@ One source of truth (the Go registry) → two delivery mechanisms. No drift.
 
 ```
 faber/
-├── cmd/faber/                 # CLI entrypoint: `faber mcp start`, `faber init --claude`
-├── internal/mcp/              # MCP server: tool registration, transports (stdio→http)
+├── cmd/faber/                 # CLI entrypoint: `faber mcp start`
+├── internal/mcp/              # MCP server: tool registration, stdio transport
 ├── pkg/agent/
-│   ├── agent.go               # Agent interface; Meta, Input, Brief, Deps, Policy types
-│   ├── registry.go            # Register / Get / List
-│   └── builtin/               # code-reviewer, architect, scalability, docs-researcher…
-├── pkg/docs/                  # ★ resolver → fetcher → cache (fetch+cache in v0)
-├── pkg/orchestrator/          # sequential / parallel composition of briefs
-├── pkg/memory/                # KV shared store across a session (vector later)
-├── plugin/                    # Claude Code plugin/file generator
+│   ├── agent.go               # Agent interface; Meta, Input, Brief, Deps, Policy
+│   ├── registry.go            # Register / Get / List (concurrency-safe)
+│   └── builtin/               # code-reviewer, architect
+├── pkg/docs/                  # docs-first policy: the Directive constant
+├── pkg/orchestrator/          # multi-agent coordination (planned, M3)
+├── pkg/memory/                # session-scoped shared store (MapStore)
 └── go.mod                     # module github.com/KhizarA77/Faber
 ```
 
-**Dependency direction:** `cmd → internal/mcp → pkg/*`. `pkg/agent` depends on
-`pkg/docs` and `pkg/memory` only through the `Deps` struct (dependency injection), so
-agents stay testable without a live network or server.
+**Dependency direction:** `cmd → internal/mcp → pkg/*`. `pkg/agent` depends on `pkg/docs`
+(for the directive) and `pkg/memory` (via the `Deps` seam). Agents are pure functions of
+their input, so they unit-test without a network or a running server.
 
 ---
 
@@ -161,67 +160,52 @@ type Agent interface {
 
 // Meta is the discoverable, routable description of an agent.
 type Meta struct {
-    Name        string   // stable id, e.g. "code-reviewer"
-    Title       string   // human label, e.g. "Code Reviewer"
-    Description string   // shown to the host for routing
-    Tags        []string // "review", "architecture", …
-    DocsFirst   bool     // enforce documentation-as-truth
+    Name, Title, Description string
+    Tags      []string
+    DocsFirst bool        // carry the docs-as-truth policy in the brief
 }
 
 // Input is what the host passes when launching an agent.
 type Input struct {
-    Task      string            // what the user wants done
+    Task      string
     Context   map[string]string // diff, target files, constraints…
-    Libraries []string          // external libs in play → triggers doc pre-fetch
+    Libraries []string          // external libs in play (hint to the host)
 }
 
 // Brief is what the host receives and then executes itself.
 type Brief struct {
-    SystemPrompt string       // persona + rules the host adopts
-    Instructions string       // ordered steps to follow
-    DocPacks     []docs.Pack  // authoritative excerpts, already fetched
-    Tools        []string     // faber tools the host should use
-    Policies     []Policy     // machine-checkable contracts
+    SystemPrompt string   // persona + rules the host adopts
+    Instructions string   // ordered steps to follow
+    Tools        []string // host tools to favor (optional)
+    Policies     []Policy  // machine-checkable contracts, e.g. docs_first
 }
 
-// Deps is the injected toolbox an agent uses while building a brief.
+// Deps is the injected toolbox an Agent uses when building a brief — the seam
+// for future subsystems (e.g. shared memory during orchestration).
 type Deps struct {
-    Docs docs.Service
-    Mem  memory.Store
+    Mem memory.Store
 }
 
 type Policy struct {
-    Name string // e.g. "docs_first"
-    Rule string // human/host-readable contract text
+    Name string `json:"name"` // e.g. "docs_first"
+    Rule string `json:"rule"` // host-readable contract text
 }
 ```
 
-A built‑in agent is then trivial and fully type‑checked:
+A built-in agent is trivial and fully type-checked:
 
 ```go
-// pkg/agent/builtin/codereviewer.go
 type CodeReviewer struct{}
 
-func (CodeReviewer) Meta() agent.Meta {
-    return agent.Meta{
-        Name: "code-reviewer", Title: "Code Reviewer",
-        Description: "Reviews diffs for correctness, security, and scalability",
-        Tags:        []string{"review", "quality"},
-        DocsFirst:   true,
-    }
-}
+var _ agent.Agent = CodeReviewer{} // compile-time interface proof
 
-func (CodeReviewer) BuildBrief(ctx context.Context, in agent.Input, d agent.Deps) (agent.Brief, error) {
-    packs, err := d.Docs.PrefetchAll(ctx, in.Libraries) // docs-as-truth
-    if err != nil {
-        return agent.Brief{}, err
-    }
+func (CodeReviewer) Meta() agent.Meta { /* … DocsFirst: true … */ }
+
+func (CodeReviewer) BuildBrief(_ context.Context, _ agent.Input, _ agent.Deps) (agent.Brief, error) {
     return agent.Brief{
         SystemPrompt: reviewerPersona,
         Instructions: reviewerSteps,
-        DocPacks:     packs,
-        Tools:        []string{"consult_docs", "read_file"},
-        Policies:     []agent.Policy{{Name: "docs_first", Rule: docsFirstRule}},
+        Policies:     []agent.Policy{{Name: "docs_first", Rule: docs.Directive}},
     }, nil
 }
 ```
@@ -229,78 +213,38 @@ func (CodeReviewer) BuildBrief(ctx context.Context, in agent.Input, d agent.Deps
 ### Registry
 
 ```go
-type Registry struct { /* name → Agent */ }
+type Registry struct { /* RWMutex + name → Agent */ }
 
-func (r *Registry) Register(a Agent)
+func (r *Registry) Register(a Agent)            // last write wins (override built-ins)
 func (r *Registry) Get(name string) (Agent, bool)
-func (r *Registry) List() []Meta
+func (r *Registry) List() []Meta               // sorted by Name for stable output
 ```
 
-Built‑ins are registered at startup. Third parties extend Faber by implementing `Agent`
-and calling `Register`.
+Built-ins are registered at startup. Third parties extend Faber by implementing `Agent` and
+calling `Register`.
 
 ---
 
-## 8. Docs subsystem (`pkg/docs`)
+## 8. Docs policy (`pkg/docs`)
 
-Three stages behind one façade, `docs.Service`:
+The whole package is a single exported constant plus its doc comment:
 
 ```go
-type Service interface {
-    Consult(ctx context.Context, lib, version, query string) (Pack, error)
-    PrefetchAll(ctx context.Context, libs []string) ([]Pack, error)
-}
-
-type Resolver interface { Resolve(lib, version string) (Source, error) } // lib → canonical docs location
-type Fetcher  interface { Fetch(ctx context.Context, src Source, query string) (Pack, error) }
-type Cache    interface { Get(key string) (Pack, bool); Set(key string, p Pack) }
-
-type Pack struct {
-    Library, Version, URL string
-    Excerpts  []Excerpt
-    FetchedAt time.Time
-}
+// Directive is the standing instruction Faber attaches to docs-first work.
+const Directive = "Ground all external API/library usage in the source of truth, " +
+    "in this order: (1) FIRST use your codebase search tools … (2) THEN use your web " +
+    "search/fetch tools to read the official documentation … (3) treat the official docs " +
+    "as the ABSOLUTE source of truth …"
 ```
 
-- **Resolver (v0):** a built‑in map of ecosystem → docs base URL (Go → `pkg.go.dev`,
-  Rust → `docs.rs`, plus official sites), with sensible fallbacks. Extensible.
-- **Fetcher (v0):** HTTP GET, HTML→text, naive query‑relevant section selection.
-- **Cache (v0):** on‑disk, keyed by `lib@version#query`, with a freshness TTL.
-
-`PrefetchAll` is what makes `DocsFirst` real — it is called inside `BuildBrief` and its
-output lands directly in `Brief.DocPacks`.
+Agents reference `docs.Directive` so the wording lives in exactly one place and can never
+drift between agents. Kept ASCII-only because it travels over the wire as protocol payload.
 
 ---
 
-## 9. Orchestrator (`pkg/orchestrator`)
+## 9. Memory (`pkg/memory`)
 
-In the brief‑and‑delegate model, "orchestration" means **composing multiple agent briefs
-into one coordination plan** the host executes step by step.
-
-```go
-type Mode int
-const ( Sequential Mode = iota; Parallel; Pipeline )
-
-type Step struct {
-    Agent     string   // registry name
-    Task      string
-    DependsOn []string // step ids
-}
-
-type Plan struct { Steps []Step; Mode Mode }
-
-func (o *Orchestrator) Compose(ctx context.Context, plan Plan, in agent.Input) (CompositeBrief, error)
-```
-
-`faber_orchestrate` takes a `Plan`, builds each step's `Brief`, and returns a single
-`CompositeBrief` describing the order and hand‑offs. The host carries it out; shared
-state flows through `pkg/memory`.
-
----
-
-## 10. Memory (`pkg/memory`)
-
-A minimal session‑scoped store so steps in an orchestration can pass context.
+A minimal session-scoped store so steps in a future orchestration can pass context.
 
 ```go
 type Store interface {
@@ -310,57 +254,69 @@ type Store interface {
 }
 ```
 
-v0 is an in‑memory KV with namespacing. A vector‑backed implementation can satisfy the
-same interface later without touching agents.
+`MapStore` implements it with an `RWMutex`; `Namespace` returns a key-prefixed view that
+shares the same underlying map and lock. A vector-backed implementation can satisfy the same
+interface later without touching agents.
 
 ---
 
-## 11. MCP tool surface (v0)
+## 10. Orchestrator (`pkg/orchestrator`, planned — M3)
 
-| Tool | Input | Returns |
+In the brief-and-delegate model, "orchestration" means **composing multiple agent briefs
+into one coordination plan** the host executes step by step (sequential / parallel /
+pipeline), with shared state flowing through `pkg/memory`. Exposed as `faber_orchestrate`.
+
+---
+
+## 11. MCP tool surface
+
+| Tool | Status | Returns |
 |---|---|---|
-| `faber_list_agents` | — | `[]Meta` for host routing |
-| `faber_launch_agent` | `role`, `task`, `context?`, `libraries?` | `Brief` |
-| `faber_consult_docs` | `library`, `query`, `version?` | `Pack` |
-| `faber_orchestrate` | `Plan` | `CompositeBrief` |
+| `faber_list_agents` | implemented | `[]Meta` for host routing |
+| `faber_launch_agent` | implemented | `Brief` for `role` + `task` |
+| `faber_orchestrate` | planned (M3) | a multi-step coordination plan |
+
+Note: there is **no** `faber_consult_docs` tool — docs reading is delegated to the host's own
+tools by policy, not performed by Faber.
 
 ---
 
 ## 12. Design principles
 
-- **Tiny trusted core.** One protocol (MCP), one external dep (the Go MCP SDK) in v0.
-- **One source of truth, many surfaces.** The Go registry generates the Claude Code
+- **Tiny trusted core.** One protocol (MCP), one external dependency (the Go MCP SDK).
+- **One source of truth, many surfaces.** The Go registry will generate the Claude Code
   plugin; nothing is authored twice.
-- **Injection over instruction.** Enforce docs‑first by putting real docs in context, not
-  by hoping the model complies.
-- **Interfaces at the seams.** `docs.Service`, `memory.Store`, and `Agent` are interfaces
-  so v0 implementations can be swapped (RAG memory, self‑hosted runtime) without churn.
-- **Compiler‑checked specialists.** Go‑coded agents catch mistakes at build time.
+- **Delegate, don't duplicate.** The host already has search/fetch/grep — Faber enforces
+  *that they're used*, rather than reimplementing them.
+- **Interfaces at the seams.** `memory.Store` and `Agent` are interfaces so implementations
+  swap (RAG memory, a self-hosted runtime) without churn.
+- **Compiler-checked specialists.** Go-coded agents catch mistakes at build time.
 
 ---
 
 ## 13. Roadmap
 
-| Milestone | Deliverable |
-|---|---|
-| **M0** | MCP server + `faber_list_agents` — proves the IDE handshake end‑to‑end |
-| **M1** | `Agent` interface, registry, `code-reviewer` + `architect` built‑ins, `faber_launch_agent` |
-| **M2** | Docs subsystem (resolver→fetcher→cache) + `faber_consult_docs`, wired into `DocsFirst` |
-| **M3** | Orchestrator + `faber_orchestrate` |
-| **M4** | `faber init --claude` generates subagent files + plugin manifest |
-| **M5** | More built‑ins, tests, README, examples |
+| Milestone | Deliverable | Status |
+|---|---|---|
+| **M0** | MCP server + `faber_list_agents` | ✅ done |
+| **M1** | `Agent` interface, registry, `code-reviewer` + `architect`, `faber_launch_agent` | ✅ done |
+| **M2** | Docs-first policy (`docs.Directive`) baked into briefs | ✅ done |
+| **Tests** | Unit tests for registry, memory, and built-in briefs | ▶ in progress |
+| **M3** | Orchestrator + `faber_orchestrate` | planned |
+| **M4** | `faber init --claude` generates subagent files + plugin manifest | planned |
+| **M5** | More built-in agents, examples, polish | planned |
 
-### Future: optional self‑contained runtime ("Model B")
+### Future: optional self-contained runtime ("Model B")
 
-A later `pkg/runtime` can implement a provider‑agnostic agent loop so Faber can *execute*
-briefs itself (true autonomous swarms, IDE‑independent). Because agents already return
+A later `pkg/runtime` can implement a provider-agnostic agent loop so Faber can *execute*
+briefs itself (true autonomous swarms, IDE-independent). Because agents already return
 `Brief`s through a stable interface, this is additive — the same agents work in both modes.
 
 ---
 
 ## 14. Glossary
 
-- **Brief** — the persona + instructions + docs + tools an agent hands to the host.
+- **Brief** — the persona + instructions + policies an agent hands to the host.
 - **Host** — the IDE/model that executes a brief (Claude Code, Codex, …).
-- **DocPack** — a bundle of authoritative documentation excerpts for one library.
-- **Docs‑first** — the policy that official documentation overrides any prior model belief.
+- **Directive** — the single docs-first policy string agents embed in their briefs.
+- **Docs-first** — the policy that official documentation overrides any prior model belief.

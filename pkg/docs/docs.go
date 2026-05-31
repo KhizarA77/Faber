@@ -1,39 +1,19 @@
-// Package docs implements documentation-as-the-source-of-truth: it resolves a
-// library to its canonical documentation, fetches the relevant pages, and caches
-// them so agents can inject authoritative excerpts into their briefs.
+// Package docs carries Faber's documentation-as-the-source-of-truth policy.
 //
-// v0 (M1) defines only the data types and the Service facade. The concrete
-// resolver→fetcher→cache implementation lands in M2.
+// Faber does not fetch documentation. Under pure delegation its only job is to
+// make agents ALWAYS ground external-API code in current official docs using the
+// host's own web and codebase tools - never in stale training memory. That
+// behavioral contract is the Directive below; docs-first agents embed it in
+// their briefs.
 package docs
 
-import (
-	"context"
-	"time"
-)
-
-// Excerpt is a single relevant passage pulled from a documentation page.
-type Excerpt struct {
-	Heading string
-	Text    string
-	Anchor  string
-}
-
-// Pack is the authoritative documentation gathered for one library.
-type Pack struct {
-	Library   string
-	Version   string
-	URL       string
-	Excerpts  []Excerpt
-	FetchedAt time.Time
-}
-
-// Service is the facade agents depend on. PrefetchAll is what makes the
-// docs-first policy real — BuildBrief calls it and drops the result straight
-// into Brief.DocPacks.
-type Service interface {
-	// Consult returns authoritative docs for a specific library/version/query.
-	Consult(ctx context.Context, lib, version, query string) (Pack, error)
-
-	// PrefetchAll gathers docs for every library in one call.
-	PrefetchAll(ctx context.Context, libs []string) ([]Pack, error)
-}
+// Directive is the standing instruction Faber attaches to docs-first work. It
+// encodes the source-of-truth order: codebase first, then official docs, which
+// win any conflict. Kept ASCII-only because it travels over the wire as protocol
+// payload.
+const Directive = "Ground all external API/library usage in the source of truth, in this order: " +
+	"(1) FIRST use your codebase search tools (grep/glob) to find existing usage and follow the " +
+	"project's established patterns; (2) THEN use your web search/fetch tools to read the official " +
+	"documentation for the libraries involved; (3) treat the official docs as the ABSOLUTE source " +
+	"of truth. When prior knowledge or assumptions conflict with the docs, the docs win. Never " +
+	"rely on memory for an external API you can verify."
